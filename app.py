@@ -520,7 +520,7 @@ if st.session_state.show_model_messages:
                         # Store in session state that we're using a user-provided key
                         st.session_state.user_provided_gemini_key = True
                         # Force a complete rerun of the app
-                        st.experimental_rerun()
+                        st.rerun()
                     else:
                         st.error("❌ Invalid API key or connection error. Please try again.")
         else:
@@ -546,7 +546,7 @@ if st.session_state.show_model_messages:
                     if 'user_provided_gemini_key' in st.session_state:
                         del st.session_state.user_provided_gemini_key
                     # Force a complete rerun of the app
-                    st.experimental_rerun()
+                    st.rerun()
     except ImportError as e:
         st.sidebar.error(f"⚠️ Error importing Gemini model: {str(e)}")
         st.sidebar.info("To enable rule generation, install the required dependency: pip install google-generativeai")
@@ -577,7 +577,7 @@ any_model_available = gemini_available or st.session_state.user_api_key_configur
 # Add a button to reset loading messages
 if st.sidebar.button("Reset Loading Messages", help="Click to clear and reset the model loading messages"):
     st.session_state.show_model_messages = False
-    st.experimental_rerun()
+    st.rerun()
 
 # GitHub badge will be added at the top of the sidebar
 
@@ -615,34 +615,28 @@ def generate_rule_code(natural_language_rule):
 
 def _generate_fallback_code(description):
     """Generate a simple fallback implementation when the model isn't available"""
-    # Create a simplified rule based on Conway's Game of Life
+    # Create a more advanced rule with three states (DEAD, ALIVE, DYING)
     return f"""
-# Initialize the new grid - always start with this line
-new_grid = np.zeros_like(grid)  # Creates a grid of zeros with the same shape as the input grid
+# Initialize the new grid by copying the current grid
+new_grid = np.copy(grid)
 
 # Rule based on description: {description}
-# This is a simplified implementation of Conway's Game of Life
+# This is an enhanced cellular automaton with three states
 
 # Loop through each cell in the grid
 for x in range(grid.shape[0]):
     for y in range(grid.shape[1]):
-        # Count how many ALIVE neighbors this cell has
         neighbors = count_neighbors(grid, x, y)
-        
-        # Conway's Game of Life rules:
-        # 1. Any live cell with 2 or 3 live neighbors survives
-        # 2. Any dead cell with exactly 3 live neighbors becomes alive
-        # 3. All other cells die or stay dead
-        
-        if grid[x, y] == ALIVE:  # If the cell is currently alive
-            if neighbors in [2, 3]:
-                new_grid[x, y] = ALIVE  # Cell survives
+        if grid[x, y] == DEAD:
+            if neighbors == 3 or np.random.rand() < 0.001:
+                new_grid[x, y] = ALIVE
+        elif grid[x, y] == ALIVE:
+            if neighbors >= 4:
+                new_grid[x, y] = DYING
             else:
-                new_grid[x, y] = DEAD   # Cell dies
-        else:  # If the cell is currently dead
-            if neighbors == 3:
-                new_grid[x, y] = ALIVE  # Cell becomes alive
-            # Otherwise it stays dead (new_grid already initialized to DEAD)
+                new_grid[x, y] = ALIVE
+        elif grid[x, y] == DYING:
+            new_grid[x, y] = DEAD
 """
 
 #############################################################
@@ -751,26 +745,21 @@ if config.rule_choice == "Custom LLM Rule":
 new_grid = np.zeros_like(grid)  # Creates a grid of zeros with the same shape as the input grid
 
 # Loop through each cell in the grid
+new_grid = np.copy(grid)
 for x in range(grid.shape[0]):
     for y in range(grid.shape[1]):
-        # Count how many ALIVE neighbors this cell has (returns a number from 0-8)
         neighbors = count_neighbors(grid, x, y)
-        
-        # Conway's Game of Life rules (modify these to create your own rule):
-        if grid[x, y] == ALIVE:  # If the cell is currently alive
-            if neighbors in [2, 3]:
-                new_grid[x, y] = ALIVE  # Cell survives
+        if grid[x, y] == DEAD:
+            if neighbors == 3 or np.random.rand() < 0.001:
+                new_grid[x, y] = ALIVE
+        elif grid[x, y] == ALIVE:
+            if neighbors >= 4:
+                new_grid[x, y] = DYING
             else:
-                new_grid[x, y] = DEAD   # Cell dies
-        else:  # If the cell is currently dead
-            if neighbors == 3:
-                new_grid[x, y] = ALIVE  # Cell becomes alive
-            # Otherwise it stays dead
+                new_grid[x, y] = ALIVE
+        elif grid[x, y] == DYING:
+            new_grid[x, y] = DEAD
 
-# Available states: 
-# - DEAD (0): Cell is inactive
-# - ALIVE (1): Cell is active
-# - DYING (2): Cell is in transition (used in Brian's Brain)
 """
     
     # Step 1: Describe the rule
