@@ -1,0 +1,21 @@
+[project]
+name = "callm"
+version = "0.1.0"
+description = "Chaotic Cellular Automata"
+authors = [
+    {name = "Sid Mohan"}
+]
+license = {text = "MIT"}
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "numpy (>=2.2.6,<3.0.0)",
+    "streamlit (>=1.45.1,<2.0.0)",
+    "matplotlib (>=3.10.3,<4.0.0)",
+    "openai (>=1.79.0,<2.0.0)"
+]
+
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
