@@ -40,8 +40,8 @@ class Config:
     DELAY_STEP = 0.05
     
     # Available rule sets
-    RULE_SETS = ["Brian's Brain", "Seeds", "Noise-Life", "Custom LLM Rule"]
-    DEFAULT_RULE = "Brian's Brain"
+    RULE_SETS = ["Custom LLM Rule", "Brian's Brain", "Seeds", "Noise-Life"]
+    DEFAULT_RULE = "Custom LLM Rule"
     
     # Visualization settings
     COLOR_PALETTE = {
@@ -468,15 +468,35 @@ if 'show_model_messages' not in st.session_state:
 # Import the local model for code generation
 if st.session_state.show_model_messages:
     try:
-        from local_model import generate_rule_code, LocalCodeGenerator
+        # Import with model loading status
+        from local_model import generate_rule_code, LocalCodeGenerator, model_loading_status
+        
         # Get the model name from the LocalCodeGenerator class
         model_name = getattr(LocalCodeGenerator, 'DEFAULT_MODEL', "Salesforce/codegen-350M-mono")
+        
+        # Start preloading the model in the background
+        LocalCodeGenerator.preload_model(model_name)
         local_model_available = True
-        # Create a clickable link to the model page but use markdown instead of HTML
-        # First show success message
-        st.sidebar.success(f"✅ Local AI model loaded successfully")
-        # Then show the model name with link using markdown
-        st.sidebar.markdown(f"[{model_name}](https://huggingface.co/{model_name})")
+        
+        # Check the loading status
+        if model_loading_status["is_loaded"]:
+            # Model already loaded and ready
+            st.sidebar.success(f"✅ Local AI model loaded and ready")
+            st.sidebar.markdown(f"[{model_name}](https://huggingface.co/{model_name})")
+        elif model_loading_status["is_loading"]:
+            # Model is currently loading - don't use success message
+            progress = model_loading_status["progress"]
+            st.sidebar.warning(f"🔄 Loading AI model... ({progress}%)")
+            st.sidebar.markdown(f"Model: [{model_name}](https://huggingface.co/{model_name})")
+            st.sidebar.progress(progress / 100.0)
+            # Add a note about first-time loading
+            if progress < 50:
+                st.sidebar.info("📚 First-time model loading may take a minute. Future runs will be faster.")
+        elif model_loading_status["error"]:
+            # Error loading model
+            st.sidebar.error(f"⚠️ Error loading model: {model_loading_status['error']}")
+            st.sidebar.info("Try restarting the application or check your installation.")
+            local_model_available = False
 
     except ImportError as e:
         st.sidebar.error(f"⚠️ Error importing local model: {str(e)}")
@@ -484,12 +504,14 @@ if st.session_state.show_model_messages:
         local_model_available = False
     except Exception as e:
         st.sidebar.error(f"⚠️ Error setting up local model: {str(e)}")
-        st.sidebar.info("The local model may require additional resources. Try using a smaller model or check the logs for details.")
+        st.sidebar.info("If you're seeing this error, try restarting the application or check your installation.")
         local_model_available = False
 else:
-    # Still try to import but don't show messages
+    # Don't show messages but still try to import
     try:
-        from local_model import generate_rule_code
+        from local_model import generate_rule_code, LocalCodeGenerator, model_loading_status
+        # Start preloading the model in the background
+        LocalCodeGenerator.preload_model()
         local_model_available = True
     except:
         local_model_available = False
@@ -645,72 +667,148 @@ grid = app.grid
 
 # Handle custom rule input if selected
 if config.rule_choice == "Custom LLM Rule":
-    # Default custom code template
+    st.markdown("### Create Your Own Cellular Automaton Rule")
+    
+    # Step-by-step instructions
+    with st.expander("📋 How to create custom rules", expanded=True):
+        st.markdown("""
+        **Creating your own cellular automaton is a 3-step process:**
+        
+        1. **Describe your rule** in plain English in the text box below
+           - Example: "Cells with exactly 2 neighbors come alive, all others die"
+           - Be specific about conditions for cells becoming alive, dying, or staying the same
+        
+        2. **Generate code** by clicking the button (requires local AI model)
+           - The AI will translate your description into Python code
+           - **The generated code is automatically applied to your simulation**
+           - No need to copy/paste - it's ready to use immediately!
+        
+        3. **Edit the code** if needed to fine-tune your rule
+           - The code must create a variable called `new_grid`
+           - You can use these constants: `DEAD (0)`, `ALIVE (1)`, `DYING (2)`
+           - Use `count_neighbors(grid, x, y)` to count a cell's neighbors
+        """)
+    
+    # Default custom code template with better comments
     default_custom_code = """
-# Initialize the new grid - always start with this line
+# Initialize the new grid - this line is required
 new_grid = np.zeros_like(grid)  # Creates a grid of zeros with the same shape as the input grid
 
 # Loop through each cell in the grid
 for x in range(grid.shape[0]):
     for y in range(grid.shape[1]):
-        # Count how many ALIVE neighbors this cell has
+        # Count how many ALIVE neighbors this cell has (returns a number from 0-8)
         neighbors = count_neighbors(grid, x, y)
         
-        # Conway's Game of Life rules (as a starting example):
-        # 1. Any live cell with 2 or 3 live neighbors survives
-        # 2. Any dead cell with exactly 3 live neighbors becomes alive
-        # 3. All other cells die or stay dead
-        
+        # Conway's Game of Life rules (modify these to create your own rule):
         if grid[x, y] == ALIVE:  # If the cell is currently alive
             if neighbors in [2, 3]:
                 new_grid[x, y] = ALIVE  # Cell survives
             else:
-                new_grid[x, y] = DEAD   # Cell dies (overpopulation or loneliness)
+                new_grid[x, y] = DEAD   # Cell dies
         else:  # If the cell is currently dead
             if neighbors == 3:
-                new_grid[x, y] = ALIVE  # Cell becomes alive (reproduction)
-            # Otherwise it stays dead (new_grid already initialized to DEAD)
+                new_grid[x, y] = ALIVE  # Cell becomes alive
+            # Otherwise it stays dead
 
-# Available states: DEAD (0), ALIVE (1), DYING (2)
-# You can use these constants in your code
+# Available states: 
+# - DEAD (0): Cell is inactive
+# - ALIVE (1): Cell is active
+# - DYING (2): Cell is in transition (used in Brian's Brain)
 """
     
-    # User interface for custom rule input
-    natural_desc = st.text_input("Describe your rule in plain English:", "Cells surrounded by 3 neighbors come alive, others die.")
+    # Step 1: Describe the rule
+    st.markdown("#### Step 1: Describe your rule")
+    natural_desc = st.text_input(
+        "Describe your rule in plain English:", 
+        "Cells surrounded by 3 neighbors come alive, others die.",
+        help="Be specific about when cells should become alive, die, or enter other states"
+    )
     
     # Initialize with default if no custom code has been set yet
     if not hasattr(app, 'custom_code') or not app.custom_code:
         app.set_custom_code(default_custom_code)
     
-    # Generate button with conditional display based on model availability
-    generate_button = st.button(
-        "Generate Rule Code from Description", 
-        disabled=not local_model_available,
-        help="Requires Transformers library and model to be installed" if not local_model_available else ""
-    )
+    # Step 2: Generate code
+    st.markdown("#### Step 2: Generate code from description")
+    col1, col2 = st.columns([1, 2])
+    
+    # Check model loading status
+    is_model_loading = False
+    if local_model_available and 'model_loading_status' in globals():
+        is_model_loading = model_loading_status.get("is_loading", False)
+        is_model_loaded = model_loading_status.get("is_loaded", False)
+    else:
+        is_model_loaded = local_model_available
+    
+    with col1:
+        # Generate button with conditional display based on model availability
+        generate_button = st.button(
+            "🧠 Generate Code", 
+            disabled=not local_model_available or is_model_loading,
+            help="Model is loading, please wait..." if is_model_loading else
+                 "Requires local AI model to be installed" if not local_model_available else 
+                 "Click to generate code from your description"
+        )
+    
+    with col2:
+        if is_model_loading:
+            progress = model_loading_status.get("progress", 0)
+            st.warning(f"🔄 AI model is loading ({progress}%)... Please wait.")
+            st.progress(progress / 100.0)
+            if progress < 50:
+                st.info("📚 First-time model loading may take a minute. Future runs will be faster.")
+        elif not local_model_available:
+            st.warning("⚠️ Local AI model not available. Install dependencies: `pip install transformers torch`")
     
     # Try to generate code from description if button is clicked and model is available
     if generate_button and natural_desc.strip():
         if local_model_available:
             try:
-                with st.spinner("Generating rule code... This may take a moment."):
+                with st.spinner("🔄 Generating rule code... This may take a moment."):
                     generated_code = generate_rule_code(natural_desc)
                     if generated_code is not None:
-                        st.success("Rule generated successfully!")
-                        st.code(generated_code, language='python')
+                        st.success("✅ Rule generated and applied automatically!")
+                        
+                        # Show the generated code in a collapsible section
+                        with st.expander("View generated code", expanded=False):
+                            st.code(generated_code, language='python')
+                            st.caption("This code has already been applied to the rule editor below.")
+                        
+                        # Apply the generated code to the rule editor
                         app.set_custom_code(generated_code)
                     else:
-                        st.warning("Could not generate code. Please edit the code manually or try a different description.")
+                        st.warning("⚠️ Could not generate code. Try a more specific description or edit the code manually.")
             except Exception as e:
-                st.error(f"Error generating code: {str(e)}")
-                st.warning("Please edit the code manually or try a different description.")
+                st.error(f"❌ Error generating code: {str(e)}")
+                st.info("You can still create a rule by editing the code manually below.")
         else:
-            st.error("Local AI model is not available.")
-            st.info("To enable rule generation, install the required dependencies: pip install transformers torch")
+            st.error("❌ Local AI model is not available.")
+            st.info("To enable rule generation, install the required dependencies: `pip install transformers torch`")
     
-    # Always show the code editor
-    app.set_custom_code(st.text_area("Edit your rule code here (must define 'new_grid'):", 
-                            height=200, value=app.custom_code or default_custom_code))
+    # Step 3: Edit code
+    st.markdown("#### Step 3: Edit your rule code")
+    st.info("💡 This is your active rule code - changes here are applied immediately to the simulation")
+    
+    # Store the previous code to detect changes
+    if 'previous_code' not in st.session_state:
+        st.session_state.previous_code = app.custom_code or default_custom_code
+    
+    # Text area for code editing
+    new_code = st.text_area(
+        "Active Rule Code:", 
+        height=250, 
+        value=app.custom_code or default_custom_code,
+        help="Your code must create a variable called 'new_grid' that will be the next state of the grid"
+    )
+    
+    # Apply the code and show confirmation if changed
+    app.set_custom_code(new_code)
+    
+    # Check if code has changed
+    if new_code != st.session_state.previous_code:
+        st.success("✅ Rule code updated and applied to simulation")
+        st.session_state.previous_code = new_code
 
 # Get the appropriate rule function based on the current configuration
 rule_fn = app.get_rule_function()

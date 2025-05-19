@@ -4,6 +4,8 @@ This replaces the OpenAI API calls with a local model to avoid rate limits and c
 """
 
 import torch
+import time
+import threading
 from transformers import AutoModelForCausalLM, AutoTokenizer
 import logging
 
@@ -11,36 +13,157 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Global variables for model loading status
+model_loading_status = {
+    "is_loading": False,
+    "is_loaded": False,
+    "progress": 0,
+    "error": None
+}
+
+# Lock for thread safety
+load_lock = threading.Lock()
+
 class LocalCodeGenerator:
     """
     A class to handle code generation using a local Hugging Face model.
-    Uses a small model suitable for code generation tasks.
+    Uses a singleton pattern to avoid reloading the model multiple times.
     """
     
     # Default model to use for code generation
     DEFAULT_MODEL = "Salesforce/codegen-350M-mono"
     
+    # Class variables for singleton pattern
+    _instance = None
+    _model = None
+    _tokenizer = None
+    
+    def __new__(cls, model_name="Salesforce/codegen-350M-mono", max_length=1024):
+        """Singleton pattern implementation"""
+        with load_lock:
+            if cls._instance is None:
+                cls._instance = super(LocalCodeGenerator, cls).__new__(cls)
+                cls._instance._initialized = False
+            return cls._instance
+    
     def __init__(self, model_name="Salesforce/codegen-350M-mono", max_length=1024):
         """
         Initialize the code generator with a specified model.
+        Uses a singleton pattern to avoid reloading the model.
         
         Args:
             model_name: Name of the Hugging Face model to use
             max_length: Maximum length of generated text
         """
+        # Only initialize once
+        if hasattr(self, '_initialized') and self._initialized:
+            return
+            
+        self.model_name = model_name
         self.max_length = max_length
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        self._initialized = True
         
-        logger.info(f"Initializing model {model_name} on {self.device}")
+        # Don't load the model in __init__, it will be loaded on first use
+        # or by the preload_model method
+    
+    @classmethod
+    def preload_model(cls, model_name="Salesforce/codegen-350M-mono"):
+        """
+        Preload the model in a background thread.
+        This can be called early in the application startup.
+        """
+        def _load_model_thread():
+            try:
+                # Mark as loading
+                with load_lock:
+                    model_loading_status["is_loading"] = True
+                    model_loading_status["progress"] = 10
+                    model_loading_status["error"] = None
+                
+                logger.info(f"Preloading model {model_name} in background thread")
+                
+                # Load tokenizer
+                with load_lock:
+                    model_loading_status["progress"] = 30
+                device = "cuda" if torch.cuda.is_available() else "cpu"
+                tokenizer = AutoTokenizer.from_pretrained(model_name)
+                
+                # Update progress
+                with load_lock:
+                    model_loading_status["progress"] = 60
+                
+                # Load model
+                model = AutoModelForCausalLM.from_pretrained(
+                    model_name, 
+                    torch_dtype=torch.float16 if device == "cuda" else torch.float32
+                ).to(device)
+                
+                # Store in class variables
+                with load_lock:
+                    cls._model = model
+                    cls._tokenizer = tokenizer
+                    model_loading_status["is_loading"] = False
+                    model_loading_status["is_loaded"] = True
+                    model_loading_status["progress"] = 100
+                
+                logger.info(f"Model preloaded successfully")
+                
+            except Exception as e:
+                logger.error(f"Failed to preload model: {str(e)}")
+                with load_lock:
+                    model_loading_status["is_loading"] = False
+                    model_loading_status["error"] = str(e)
+        
+        # Start loading in background thread if not already loaded/loading
+        with load_lock:
+            if not model_loading_status["is_loading"] and not model_loading_status["is_loaded"]:
+                thread = threading.Thread(target=_load_model_thread)
+                thread.daemon = True  # Thread will exit when main program exits
+                thread.start()
+                return True
+            return False
+    
+    def _ensure_model_loaded(self):
+        """Ensure the model is loaded before use"""
+        # If model is already loaded in class variables, use it
+        if self.__class__._model is not None and self.__class__._tokenizer is not None:
+            self.model = self.__class__._model
+            self.tokenizer = self.__class__._tokenizer
+            return
+        
+        # Otherwise load the model
+        logger.info(f"Loading model {self.model_name} on {self.device} on demand")
         try:
-            self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+            with load_lock:
+                model_loading_status["is_loading"] = True
+                model_loading_status["progress"] = 20
+            
+            self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
+            
+            with load_lock:
+                model_loading_status["progress"] = 60
+            
             self.model = AutoModelForCausalLM.from_pretrained(
-                model_name, 
+                self.model_name, 
                 torch_dtype=torch.float16 if self.device == "cuda" else torch.float32
             ).to(self.device)
+            
+            # Store in class variables for future instances
+            self.__class__._model = self.model
+            self.__class__._tokenizer = self.tokenizer
+            
+            with load_lock:
+                model_loading_status["is_loading"] = False
+                model_loading_status["is_loaded"] = True
+                model_loading_status["progress"] = 100
+            
             logger.info(f"Model loaded successfully")
         except Exception as e:
             logger.error(f"Failed to load model: {str(e)}")
+            with load_lock:
+                model_loading_status["is_loading"] = False
+                model_loading_status["error"] = str(e)
             raise
     
     def generate_code(self, prompt, temperature=0.7, top_p=0.95):
@@ -56,6 +179,9 @@ class LocalCodeGenerator:
             Generated code as a string
         """
         try:
+            # Ensure model is loaded before use
+            self._ensure_model_loaded()
+            
             # Format the prompt for code generation
             formatted_prompt = f"""
 # Generate Python code for a cellular automaton rule based on this description:
