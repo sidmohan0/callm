@@ -6,4 +6,4 @@ python-dotenv>=0.19.0
 # Dependencies for local model (replacing OpenAI)
 torch>=2.0.0
 transformers>=4.30.0
-accelerators>=0.1.0  # Optional: for faster inference if available
+# Removed accelerators package as it's not available in PyPI
