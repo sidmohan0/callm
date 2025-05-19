@@ -3,7 +3,7 @@ numpy>=1.20.0
 matplotlib>=3.5.0
 python-dotenv>=0.19.0
 
-# Dependencies for local model (replacing OpenAI)
+# Dependencies for AI models
 torch>=2.0.0
 transformers>=4.30.0
-# Removed accelerators package as it's not available in PyPI
+google-generativeai>=0.8.0  # Google Gemini API
