@@ -4,7 +4,6 @@ import matplotlib.pyplot as plt
 import time
 import ast
 from matplotlib.colors import ListedColormap
-import openai
 import os
 
 #############################################################
@@ -446,106 +445,98 @@ def run_custom_rule(grid, custom_code):
         return grid
 
 #############################################################
-# OPENAI API INTEGRATION                                    #
+# LOCAL MODEL INTEGRATION                                   #
 #############################################################
 
-# OpenAI API key setup (expects key from environment or Streamlit secrets)
+# Import the local model for code generation
 try:
-    # Try to get API key from environment or secrets
-    api_key = os.getenv("OPENAI_API_KEY", "")
-    if not api_key and hasattr(st, 'secrets'):
-        # Try to get from Streamlit secrets
-        api_key = st.secrets.get("OPENAI_API_KEY", "")
-        # Also check nested dictionary format
-        if not api_key and "openai" in st.secrets:
-            api_key = st.secrets["openai"].get("OPENAI_API_KEY", "")
-    
-    # Create OpenAI client if we have an API key
-    if api_key:
-        client = openai.OpenAI(api_key=api_key)
-        openai_available = True
-    else:
-        st.sidebar.warning("⚠️ OpenAI API key not found. Custom rule generation will be disabled.")
-        openai_available = False
+    from local_model import generate_rule_code
+    local_model_available = True
+    st.sidebar.success("✅ Local AI model loaded successfully for custom rule generation.")
+except ImportError as e:
+    st.sidebar.error(f"⚠️ Error importing local model: {str(e)}")
+    st.sidebar.info("To enable custom rule generation, install the required dependencies with: pip install transformers torch")
+    local_model_available = False
 except Exception as e:
-    st.sidebar.error(f"⚠️ Error setting up OpenAI client: {str(e)}")
-    openai_available = False
+    st.sidebar.error(f"⚠️ Error setting up local model: {str(e)}")
+    st.sidebar.info("The local model may require additional resources. Try using a smaller model or check the logs for details.")
+    local_model_available = False
+
+# Import the local model function with a different name to avoid namespace conflicts
+try:
+    from local_model import generate_rule_code as local_generate_rule_code
+    local_model_available = True
+    st.sidebar.success("✅ Local AI model loaded successfully for custom rule generation.")
+except ImportError as e:
+    st.sidebar.error(f"⚠️ Error importing local model: {str(e)}")
+    st.sidebar.info("To enable custom rule generation, install the required dependencies with: pip install transformers torch")
+    local_model_available = False
+except Exception as e:
+    st.sidebar.error(f"⚠️ Error setting up local model: {str(e)}")
+    st.sidebar.info("The local model may require additional resources. Try using a smaller model or check the logs for details.")
+    local_model_available = False
 
 def generate_rule_code(natural_language_rule):
     """
     Generates Python code for a cellular automaton rule based on a natural language description.
     
-    Uses OpenAI's GPT-4 model to translate the natural language description into executable Python code
+    Uses a local Transformers model to translate the natural language description into executable Python code
     that implements the described cellular automaton rule.
     
     Args:
-        natural_language_rule: A string containing a natural language description of the desired rule
+        natural_language_rule: A string describing the desired cellular automaton rule
         
     Returns:
-        A string containing Python code that implements the described rule
-        
-    Raises:
-        Various OpenAI API exceptions with user-friendly error messages
+        A string containing Python code implementing the rule, or None if the model is not available
     """
-    # Define the system prompt to guide the model
-    system_prompt = """You are a Python expert writing code for a 2D cellular automata.
-Each cell can be DEAD (0), ALIVE (1), or DYING (2). The function should assign a new state for each cell in a grid,
-based on the number of ALIVE neighbors and the current cell's state.
-Your code must define: new_grid = np.zeros_like(grid), and iterate over each cell (x, y).
-Return only the Python code that assigns values to new_grid[x, y] using count_neighbors(grid, x, y)."""
-
-    # Create the user prompt with the natural language rule
-    user_prompt = f"""Write a Python function body that implements this CA rule:
-"{natural_language_rule}". Use 'new_grid' as the output array."""
-
     try:
-        # First attempt with GPT-4 Turbo
-        response = client.chat.completions.create(
-            model="gpt-4-turbo",
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ],
-            temperature=0.7,
-            max_tokens=500
-        )
-        return response.choices[0].message.content
-        
-    except openai.RateLimitError as e:
-        # Handle rate limiting specifically
-        st.error("Rate limit exceeded. Please try again in a few moments.")
-        st.info("OpenAI API rate limit reached. The API has a limit on how many requests can be made in a time period.")
-        raise e
-        
-    except openai.APITimeoutError as e:
-        # Handle timeout errors
-        st.error("OpenAI API request timed out. Please try again.")
-        st.info("The request to the OpenAI API took too long to complete. This might be due to high server load.")
-        raise e
-        
-    except openai.APIConnectionError as e:
-        # Handle connection errors
-        st.error("Could not connect to OpenAI API. Please check your internet connection.")
-        st.info("There was an issue connecting to the OpenAI servers. This could be due to network issues or server outages.")
-        raise e
-        
-    except openai.BadRequestError as e:
-        # Handle invalid requests
-        st.error(f"Invalid request to OpenAI API: {str(e)}")
-        st.info("The request to OpenAI was invalid. This might be due to an issue with the prompt or parameters.")
-        raise e
-        
-    except openai.AuthenticationError as e:
-        # Handle authentication errors
-        st.error("Authentication error with OpenAI API. Please check your API key.")
-        st.info("Your OpenAI API key appears to be invalid or has expired. Please update it in your environment variables or Streamlit secrets.")
-        raise e
-        
+        # Check if the local model is available
+        if local_model_available:
+            return local_generate_rule_code(natural_language_rule)
+        else:
+            # If model isn't available, inform the user and return None
+            st.error("⚠️ Local AI model is not available for code generation.")
+            st.info("Please make sure you have installed the required dependencies: pip install transformers torch")
+            st.info("Try selecting one of the built-in rule sets instead.")
+            return None
+    
     except Exception as e:
-        # Fallback for any other errors
-        st.error(f"Unexpected error when calling OpenAI API: {str(e)}")
-        st.info("An unexpected error occurred. If this persists, please check the OpenAI status page or contact support.")
-        raise e
+        # Handle any errors during code generation
+        st.error(f"Error generating code: {str(e)}")
+        st.info("Please try again with a different description or select one of the built-in rule sets.")
+        return None
+
+def _generate_fallback_code(description):
+    """Generate a simple fallback implementation when the model isn't available"""
+    # Create a simplified rule based on Conway's Game of Life
+    return f"""
+# Initialize the new grid - always start with this line
+new_grid = np.zeros_like(grid)  # Creates a grid of zeros with the same shape as the input grid
+
+# Rule based on description: {description}
+# This is a simplified implementation of Conway's Game of Life
+
+# Loop through each cell in the grid
+for x in range(grid.shape[0]):
+    for y in range(grid.shape[1]):
+        # Count how many ALIVE neighbors this cell has
+        neighbors = count_neighbors(grid, x, y)
+        
+        # Conway's Game of Life rules:
+        # 1. Any live cell with 2 or 3 live neighbors survives
+        # 2. Any dead cell with exactly 3 live neighbors becomes alive
+        # 3. All other cells die or stay dead
+        
+        if grid[x, y] == ALIVE:  # If the cell is currently alive
+            if neighbors in [2, 3]:
+                new_grid[x, y] = ALIVE  # Cell survives
+            else:
+                new_grid[x, y] = DEAD   # Cell dies
+        else:  # If the cell is currently dead
+            if neighbors == 3:
+                new_grid[x, y] = ALIVE  # Cell becomes alive
+            # Otherwise it stays dead (new_grid already initialized to DEAD)
+"""
 
 #############################################################
 # MAIN APPLICATION LOGIC                                    #
@@ -652,35 +643,35 @@ for x in range(grid.shape[0]):
     if not hasattr(app, 'custom_code') or not app.custom_code:
         app.set_custom_code(default_custom_code)
     
-    # Generate button with conditional display based on API availability
+    # Generate button with conditional display based on model availability
     generate_button = st.button(
         "Generate Rule Code from Description", 
-        disabled=not openai_available,
-        help="Requires OpenAI API key to be configured" if not openai_available else ""
+        disabled=not local_model_available,
+        help="Requires Transformers library and model to be installed" if not local_model_available else ""
     )
     
-    # Try to generate code from description if button is clicked and API is available
+    # Try to generate code from description if button is clicked and model is available
     if generate_button and natural_desc.strip():
-        if openai_available:
+        if local_model_available:
             try:
                 with st.spinner("Generating rule code... This may take a moment."):
                     generated_code = generate_rule_code(natural_desc)
-                    st.success("Rule generated successfully!")
-                    st.code(generated_code, language='python')
-                    app.set_custom_code(generated_code)
+                    if generated_code is not None:
+                        st.success("Rule generated successfully!")
+                        st.code(generated_code, language='python')
+                        app.set_custom_code(generated_code)
+                    else:
+                        st.warning("Could not generate code. Please edit the code manually or try a different description.")
             except Exception as e:
-                st.error(f"Error connecting to OpenAI API: {str(e)}")
-                st.warning("Using manual code input instead. Please enter your rule code below.")
-                app.set_custom_code(st.text_area("Paste your custom rule code here (must define 'new_grid'):", 
-                                        height=200, value=default_custom_code))
+                st.error(f"Error generating code: {str(e)}")
+                st.warning("Please edit the code manually or try a different description.")
         else:
-            st.error("OpenAI API is not available. Please check your API key configuration.")
-            st.info("You can still create custom rules by editing the code directly below.")
-            app.set_custom_code(st.text_area("Enter your custom rule code here (must define 'new_grid'):", 
-                                    height=200, value=default_custom_code))
-    else:
-        app.set_custom_code(st.text_area("Paste your custom rule code here (must define 'new_grid'):", 
-                                height=200, value=app.custom_code or default_custom_code))
+            st.error("Local AI model is not available.")
+            st.info("To enable rule generation, install the required dependencies: pip install transformers torch")
+    
+    # Always show the code editor
+    app.set_custom_code(st.text_area("Edit your rule code here (must define 'new_grid'):", 
+                            height=200, value=app.custom_code or default_custom_code))
 
 # Get the appropriate rule function based on the current configuration
 rule_fn = app.get_rule_function()
