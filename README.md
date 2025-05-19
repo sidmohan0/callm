@@ -1,6 +1,6 @@
-# CallM: AI-Powered Cellular Automata Explorer
+# CALLM: AI-Powered Cellular Automata Explorer
 
-CallM is a streamlined, interactive application for exploring and experimenting with cellular automata. Built with Python and Streamlit, it offers a seamless way to visualize complex emergent behaviors from simple rule sets.
+CALLM is a streamlined, interactive application for exploring and experimenting with cellular automata. Built with Python and Streamlit, it offers a seamless way to visualize complex emergent behaviors from simple rule sets.
 
 ## Features
 
@@ -11,7 +11,7 @@ CallM is a streamlined, interactive application for exploring and experimenting 
 
 ## AI-Powered Rule Generation
 
-CallM introduces a novel approach to cellular automata experimentation: **natural language rule creation**. This groundbreaking feature allows you to:
+CALLM introduces a novel approach to cellular automata experimentation: **natural language rule creation**. This groundbreaking feature allows you to:
 
 - **Describe rules in plain English**: Simply explain how you want cells to behave
 - **Instant code generation**: The application leverages OpenAI's language models to translate your description into functional Python code
@@ -55,7 +55,7 @@ To use the custom rule generation feature, you'll need an OpenAI API key:
 
 Cellular automata are discrete models where cells on a grid evolve through a series of time steps according to fixed rules. Each cell's state depends on its previous state and the states of neighboring cells.
 
-CallM implements several classic rule sets:
+CALLM implements several classic rule sets:
 
 - **Brian's Brain**: A three-state cellular automaton with alive, dying, and dead states
 - **Seeds**: A binary cellular automaton where cells are born with exactly 2 neighbors

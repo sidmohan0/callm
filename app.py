@@ -599,14 +599,14 @@ class CellularAutomataApp:
 app = CellularAutomataApp(config)
 
 # Application title
-st.title("CallM: AI-Powered Cellular Automata Explorer")
+st.title("CALLM: AI-Powered Cellular Automata Explorer")
 
 # Informative subheading with context
 st.markdown("""
     Cellular automata are mathematical models where cells on a grid evolve through time based on simple rules.
     Each cell's new state depends on its current state and the states of neighboring cells, creating complex patterns from simple rules.
     
-    **CallM** lets you explore classic cellular automata like Brian's Brain and Seeds, or create your own rules using natural language.
+    **CALLM** lets you explore classic cellular automata like Brian's Brain and Seeds, or create your own rules using natural language.
     Watch as complex patterns emerge, stabilize, or repeat in real-time!
 """)
 
