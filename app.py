@@ -476,6 +476,10 @@ if 'show_model_messages' not in st.session_state:
 # Initialize model availability flag
 gemini_available = False
 
+# Initialize session state for API key configuration if not already set
+if 'user_api_key_configured' not in st.session_state:
+    st.session_state.user_api_key_configured = False
+
 # Import the Gemini model for code generation
 if st.session_state.show_model_messages:
     try:
@@ -485,6 +489,11 @@ if st.session_state.show_model_messages:
         # Attempt initial configuration (from env/secrets)
         gemini_generator.attempt_initial_configuration()
         gemini_available = gemini_generator.is_configured
+        
+        # If the user previously configured an API key in this session, update gemini_available
+        if st.session_state.user_api_key_configured and 'user_gemini_api_key' in st.session_state:
+            if not gemini_available: # Only try if not already configured
+                gemini_available = gemini_generator.configure_with_user_key(st.session_state.user_gemini_api_key)
         
         # Add UI for user to input API key if not configured
         if not gemini_available:
@@ -499,12 +508,19 @@ if st.session_state.show_model_messages:
                 if submit_key and user_api_key:
                     # Try to configure with user-provided key
                     if gemini_generator.configure_with_user_key(user_api_key):
-                        st.success("✅ API key configured successfully!")
+                        # Set the flag that user has configured an API key successfully
+                        st.session_state.user_api_key_configured = True
+                        # Store the API key in session state for reuse
+                        st.session_state.user_gemini_api_key = user_api_key
+                        # Update availability flags
                         gemini_available = True
+                        any_model_available = True
+                        # Show success message
+                        st.success("✅ API key configured successfully!")
                         # Store in session state that we're using a user-provided key
-                        st.session_state['user_provided_gemini_key'] = True
-                        # Rerun to update UI
-                        st.rerun()
+                        st.session_state.user_provided_gemini_key = True
+                        # Force a complete rerun of the app
+                        st.experimental_rerun()
                     else:
                         st.error("❌ Invalid API key or connection error. Please try again.")
         else:
@@ -519,11 +535,18 @@ if st.session_state.show_model_messages:
                     # Clear the user-provided key flag
                     if 'user_provided_gemini_key' in st.session_state:
                         del st.session_state['user_provided_gemini_key']
-                    # Reset the generator's configuration
+                    # Reset all configuration flags
                     gemini_generator.is_configured = False
                     gemini_available = False
-                    # Rerun to update UI
-                    st.rerun()
+                    any_model_available = False
+                    # Clear session state variables
+                    st.session_state.user_api_key_configured = False
+                    if 'user_gemini_api_key' in st.session_state:
+                        del st.session_state.user_gemini_api_key
+                    if 'user_provided_gemini_key' in st.session_state:
+                        del st.session_state.user_provided_gemini_key
+                    # Force a complete rerun of the app
+                    st.experimental_rerun()
     except ImportError as e:
         st.sidebar.error(f"⚠️ Error importing Gemini model: {str(e)}")
         st.sidebar.info("To enable rule generation, install the required dependency: pip install google-generativeai")
@@ -540,16 +563,16 @@ else:
         # Try to configure from environment/secrets first
         gemini_generator.attempt_initial_configuration()
         
-        # If we have a user-provided key in session state, try to use that
-        if not gemini_generator.is_configured and st.session_state.get('user_provided_gemini_key', False) and 'user_gemini_api_key' in st.session_state:
-            gemini_generator.configure_with_user_key(st.session_state['user_gemini_api_key'])
+        # If the user previously configured an API key in this session, use it
+        if not gemini_generator.is_configured and st.session_state.user_api_key_configured and 'user_gemini_api_key' in st.session_state:
+            gemini_generator.configure_with_user_key(st.session_state.user_gemini_api_key)
             
         gemini_available = gemini_generator.is_configured
     except:
         gemini_available = False
 
-# Use gemini_available as the only model availability flag
-any_model_available = gemini_available
+# Set any_model_available based on gemini_available and user_api_key_configured
+any_model_available = gemini_available or st.session_state.user_api_key_configured
 
 # Add a button to reset loading messages
 if st.sidebar.button("Reset Loading Messages", help="Click to clear and reset the model loading messages"):
@@ -770,8 +793,8 @@ for x in range(grid.shape[0]):
         # Generate button with conditional display based on model availability
         generate_button = st.button(
             "🧠 Generate Code", 
-            disabled=not gemini_available,
-            help="Google Gemini API not configured" if not gemini_available else 
+            disabled=not any_model_available,
+            help="Google Gemini API not configured" if not any_model_available else 
                  "Click to generate code from your description"
         )
     
