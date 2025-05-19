@@ -33,13 +33,13 @@ class Config:
     # Grid size limits
     MIN_GRID_SIZE = 20
     MAX_GRID_SIZE = 200  # Upper limit to prevent performance issues
-    DEFAULT_GRID_SIZE = 100
-    WARNING_THRESHOLD = 150  # Show warning for grid sizes above this threshold
+    DEFAULT_GRID_SIZE = 50
+    WARNING_THRESHOLD = 100  # Show warning for grid sizes above this threshold
     
     # Simulation constants
-    DEFAULT_STEPS = 100
+    DEFAULT_STEPS = 50
     MIN_STEPS = 1
-    MAX_STEPS = 500
+    MAX_STEPS = 100
     
     # Delay settings
     MIN_DELAY = 0.0
@@ -48,8 +48,17 @@ class Config:
     DELAY_STEP = 0.05
     
     # Available rule sets
-    RULE_SETS = ["Custom LLM Rule", "Brian's Brain", "Seeds", "Noise-Life"]
+    RULE_SETS = ["Custom LLM Rule", "Brian's Brain", "Seeds", "Noise-Life", "SIR Contagion"]
     DEFAULT_RULE = "Custom LLM Rule"
+    
+    # SIR Contagion model parameters
+    MIN_BETA = 0.01
+    MAX_BETA = 1.0
+    DEFAULT_BETA = 0.25
+    
+    MIN_ILL_DAYS = 1
+    MAX_ILL_DAYS = 20
+    DEFAULT_ILL_DAYS = 5
     
     # Visualization settings
     COLOR_PALETTE = {
@@ -111,7 +120,9 @@ class Config:
             "Noise-Life": "A variant of Conway's Game of Life with random noise. "
                         "Similar rules to Conway but with a 1% chance of random state changes.",
             "Custom LLM Rule": "Create your own cellular automaton rules using natural language. "
-                           "Describe the rules in plain English and let AI generate the code."
+                           "Describe the rules in plain English and let AI generate the code.",
+            "SIR Contagion": "A cellular automaton where cells are born if they have exactly 2 neighbors, "
+                            "otherwise they die. Creates beautiful fractal-like patterns.", 
         }
         
         # Use radio buttons instead of selectbox for rule selection
@@ -126,6 +137,36 @@ class Config:
         
         # Show description tooltip for the selected rule
         st.sidebar.info(rule_descriptions[self.rule_choice])
+        
+        # Add SIR Contagion model parameters when that rule is selected
+        if self.rule_choice == "SIR Contagion":
+            st.sidebar.subheader("SIR Model Parameters")
+            
+            # Add beta (infection rate) slider
+            self.sir_beta = st.sidebar.slider(
+                "Infection Rate (β)", 
+                min_value=self.MIN_BETA, 
+                max_value=self.MAX_BETA, 
+                value=self.DEFAULT_BETA,
+                help="Probability of infection when a susceptible cell is near an infected cell"
+            )
+            
+            # Add ill_days (recovery time) slider
+            self.sir_ill_days = st.sidebar.slider(
+                "Recovery Time", 
+                min_value=self.MIN_ILL_DAYS, 
+                max_value=self.MAX_ILL_DAYS, 
+                value=self.DEFAULT_ILL_DAYS,
+                help="Number of steps before an infected cell recovers"
+            )
+            
+            # Add button to reset the simulation when parameters change
+            if st.sidebar.button("Apply SIR Parameters"):
+                # Reset the age grid to force reinitialization with new parameters
+                if 'sir_age_grid' in st.session_state:
+                    del st.session_state.sir_age_grid
+                # Force a rerun to apply changes
+                st.rerun()
 
 # Create a global configuration instance
 config = Config()
@@ -196,6 +237,7 @@ def initialize_grid(size, rule_type=None, cfg=None):
     elif rule_type == "Noise-Life":
         # Noise-Life works well with random patterns
         return initialize_noise_life(grid, size)
+
     else:
         # For custom rules, use a general-purpose pattern
         return initialize_general(grid, size)
@@ -307,6 +349,58 @@ def initialize_general(grid, size):
         grid[x, y] = ALIVE
     
     return grid
+
+# --- SIR RULE --------------------------------------------------------------
+def sir_step_internal(state, age, beta=0.25, ill_days=5):
+    """
+    state : 2-D int array (0=S, 1=I, -1=R)
+    age   : 2-D int array tracking how long each cell has been infected
+    returns updated (state, age)
+    """
+    from scipy.signal import convolve2d
+    # Count infected neighbours
+    kernel = np.ones((3,3), dtype=int); kernel[1,1] = 0
+    neigh_inf = convolve2d((state>0).astype(int), kernel, mode='same', boundary='wrap')
+
+    # Susceptible → Infected
+    new_inf = (state == 0) & (neigh_inf > 0) & (np.random.rand(*state.shape) < beta)
+    state[new_inf] = 1; age[new_inf] = 0
+
+    # Age the sick
+    age[state > 0] += 1
+
+    # Infected → Recovered
+    recover = (state > 0) & (age >= ill_days)
+    state[recover] = -1
+    age[recover]  = 0
+    return state, age
+
+# Wrapper function for sir_step that maintains age state
+def sir_step(state):
+    """Wrapper for sir_step_internal that handles the age parameter"""
+    # Initialize or get the age grid from session state
+    if 'sir_age_grid' not in st.session_state:
+        st.session_state.sir_age_grid = np.zeros_like(state)
+    
+    # Get the SIR model parameters from the config
+    beta = config.sir_beta if hasattr(config, 'sir_beta') else config.DEFAULT_BETA
+    ill_days = config.sir_ill_days if hasattr(config, 'sir_ill_days') else config.DEFAULT_ILL_DAYS
+    
+    # Call the internal function with both state and age, passing the configured parameters
+    new_state, new_age = sir_step_internal(state.copy(), st.session_state.sir_age_grid, beta=beta, ill_days=ill_days)
+    
+    # Store the updated age grid
+    st.session_state.sir_age_grid = new_age
+    
+    # Map SIR states to our standard states (S=DEAD, I=ALIVE, R=DYING)
+    # SIR uses 0 for S, 1 for I, -1 for R
+    # Our app uses 0 for DEAD, 1 for ALIVE, 2 for DYING
+    mapped_state = np.zeros_like(new_state)
+    mapped_state[new_state == 0] = DEAD   # S -> DEAD
+    mapped_state[new_state == 1] = ALIVE  # I -> ALIVE
+    mapped_state[new_state == -1] = DYING # R -> DYING
+    
+    return mapped_state
 
 def count_neighbors(grid, x, y):
     # Get grid dimensions
@@ -662,7 +756,8 @@ class CellularAutomataApp:
         self.rule_map = {
             "Brian's Brain": brians_brain_step,
             "Seeds": seeds_step,
-            "Noise-Life": noise_life_step
+            "Noise-Life": noise_life_step,
+            "SIR Contagion": sir_step,
         }
         
         # Initialize the grid based on the selected rule
