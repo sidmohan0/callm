@@ -14,7 +14,7 @@ CALLM is a streamlined, interactive application for exploring and experimenting 
 CALLM introduces a novel approach to cellular automata experimentation: **natural language rule creation**. This groundbreaking feature allows you to:
 
 - **Describe rules in plain English**: Simply explain how you want cells to behave
-- **Instant code generation**: The application leverages OpenAI's language models to translate your description into functional Python code
+- **Instant code generation**: The application leverages Google's Gemini API to translate your description into functional Python code
 - **No programming required**: Create complex cellular automata without writing a single line of code
 - **Immediate visualization**: See your custom rules in action instantly
 
@@ -28,7 +28,7 @@ This bridges the gap between creative concept and technical implementation, enab
 - Streamlit
 - NumPy
 - Matplotlib
-- OpenAI API key (optional, for custom rule generation)
+- Google Gemini API key (optional, for custom rule generation)
 
 ### Installation
 
@@ -46,10 +46,17 @@ streamlit run callm/app.py
 
 ### Configuration
 
-To use the custom rule generation feature, you'll need an OpenAI API key:
+To use the custom rule generation feature, you'll need a Google Gemini API key. You have two options:
 
-1. Create a `.streamlit/secrets.toml` file in the project root
-2. Add your API key: `OPENAI_API_KEY = "your-api-key-here"`
+1. **Configuration file**:
+   - Create a `.streamlit/secrets.toml` file in the project root
+   - Add your API key: `[openai]
+GOOGLE_GEMINI_API_KEY = "your-api-key-here"`
+
+2. **In-app entry**:
+   - If no API key is configured, the app will provide a form in the sidebar
+   - Enter your API key directly in the app
+   - The key will be stored only for your current session
 
 ## How It Works
 
@@ -81,4 +88,4 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 - Inspired by the work of John Conway, Brian Silverman, and other cellular automata pioneers
 - Built with Streamlit's interactive framework
-- Custom rule generation powered by OpenAI's language models
+- Custom rule generation powered by Google's Gemini API

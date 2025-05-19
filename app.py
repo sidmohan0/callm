@@ -11,6 +11,9 @@ import os
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Define rate limit constant for Gemini API calls
+RATE_LIMIT_SECONDS = 10
+
 #############################################################
 # CONFIGURATION AND CONSTANTS                               #
 #############################################################
@@ -470,101 +473,88 @@ def run_custom_rule(grid, custom_code):
 if 'show_model_messages' not in st.session_state:
     st.session_state.show_model_messages = True
 
-# Initialize model availability flags
+# Initialize model availability flag
 gemini_available = False
-local_model_available = False
 
 # Import the Gemini model for code generation
 if st.session_state.show_model_messages:
     try:
         from gemini_model import generate_rule_code_with_gemini, get_gemini_generator
         gemini_generator = get_gemini_generator()
+        
+        # Attempt initial configuration (from env/secrets)
+        gemini_generator.attempt_initial_configuration()
         gemini_available = gemini_generator.is_configured
         
-        if gemini_available:
+        # Add UI for user to input API key if not configured
+        if not gemini_available:
+            st.sidebar.warning("⚠️ Google Gemini API not configured")
+            st.sidebar.info("You can enter your API key below or add GOOGLE_GEMINI_API_KEY to .streamlit/secrets.toml")
+            
+            # Create a form for API key input
+            with st.sidebar.form("gemini_api_key_form"):
+                user_api_key = st.text_input("Google Gemini API Key", type="password", help="Get a key at https://ai.google.dev/")
+                submit_key = st.form_submit_button("Connect")
+                
+                if submit_key and user_api_key:
+                    # Try to configure with user-provided key
+                    if gemini_generator.configure_with_user_key(user_api_key):
+                        st.success("✅ API key configured successfully!")
+                        gemini_available = True
+                        # Store in session state that we're using a user-provided key
+                        st.session_state['user_provided_gemini_key'] = True
+                        # Rerun to update UI
+                        st.rerun()
+                    else:
+                        st.error("❌ Invalid API key or connection error. Please try again.")
+        else:
+            # API is configured, show success message
             st.sidebar.success(f"✅ Google Gemini API connected and ready")
             st.sidebar.markdown(f"Model: [{gemini_generator.model_name}](https://ai.google.dev/models/{gemini_generator.model_name})")
-        else:
-            st.sidebar.warning("⚠️ Google Gemini API not configured")
-            st.sidebar.info("Add GOOGLE_GEMINI_API_KEY to .streamlit/secrets.toml or as an environment variable")
+            
+            # If using a user-provided key, show a note and option to reset
+            if st.session_state.get('user_provided_gemini_key', False):
+                st.sidebar.info("Using your provided API key for this session")
+                if st.sidebar.button("Reset API Key"):
+                    # Clear the user-provided key flag
+                    if 'user_provided_gemini_key' in st.session_state:
+                        del st.session_state['user_provided_gemini_key']
+                    # Reset the generator's configuration
+                    gemini_generator.is_configured = False
+                    gemini_available = False
+                    # Rerun to update UI
+                    st.rerun()
     except ImportError as e:
         st.sidebar.error(f"⚠️ Error importing Gemini model: {str(e)}")
-        st.sidebar.info("To enable Gemini, install the required dependency: pip install google-generativeai")
+        st.sidebar.info("To enable rule generation, install the required dependency: pip install google-generativeai")
         gemini_available = False
     except Exception as e:
         st.sidebar.error(f"⚠️ Error setting up Gemini: {str(e)}")
         gemini_available = False
-
-# Import the local model as fallback
-if st.session_state.show_model_messages:
-    try:
-        # Import with model loading status
-        from local_model import generate_rule_code, LocalCodeGenerator, model_loading_status
-        
-        # Get the model name from the LocalCodeGenerator class
-        model_name = getattr(LocalCodeGenerator, 'DEFAULT_MODEL', "Salesforce/codegen-350M-mono")
-        
-        # Start preloading the model in the background if Gemini is not available
-        if not gemini_available:
-            LocalCodeGenerator.preload_model(model_name)
-            
-        local_model_available = True
-        
-        # Check the loading status
-        if model_loading_status["is_loaded"]:
-            # Model already loaded and ready
-            st.sidebar.success(f"✅ Local fallback model loaded and ready")
-            st.sidebar.markdown(f"[{model_name}](https://huggingface.co/{model_name})")
-        elif model_loading_status["is_loading"] and not gemini_available:
-            # Only show loading message if Gemini is not available
-            progress = model_loading_status["progress"]
-            st.sidebar.warning(f"🔄 Loading fallback model... ({progress}%)")
-            st.sidebar.markdown(f"Model: [{model_name}](https://huggingface.co/{model_name})")
-            st.sidebar.progress(progress / 100.0)
-            if progress < 50:
-                st.sidebar.info("📚 First-time model loading may take a minute. Future runs will be faster.")
-        elif model_loading_status["error"] and not gemini_available:
-            # Error loading model - only show if Gemini is not available
-            st.sidebar.error(f"⚠️ Error loading fallback model: {model_loading_status['error']}")
-            st.sidebar.info("Try restarting the application or check your installation.")
-            local_model_available = False
-
-    except ImportError as e:
-        if not gemini_available:
-            # Only show error if Gemini is not available
-            st.sidebar.error(f"⚠️ Error importing local model: {str(e)}")
-            st.sidebar.info("To enable rule generation, install the required dependencies: pip install transformers torch")
-        local_model_available = False
-    except Exception as e:
-        if not gemini_available:
-            # Only show error if Gemini is not available
-            st.sidebar.error(f"⚠️ Error setting up local model: {str(e)}")
-            st.sidebar.info("If you're seeing this error, try restarting the application or check your installation.")
-        local_model_available = False
 else:
-    # Don't show messages but still try to import
+    # Don't show messages but still try to import and configure
     try:
         from gemini_model import generate_rule_code_with_gemini, get_gemini_generator
         gemini_generator = get_gemini_generator()
+        
+        # Try to configure from environment/secrets first
+        gemini_generator.attempt_initial_configuration()
+        
+        # If we have a user-provided key in session state, try to use that
+        if not gemini_generator.is_configured and st.session_state.get('user_provided_gemini_key', False) and 'user_gemini_api_key' in st.session_state:
+            gemini_generator.configure_with_user_key(st.session_state['user_gemini_api_key'])
+            
         gemini_available = gemini_generator.is_configured
     except:
         gemini_available = False
-        
-    try:
-        from local_model import generate_rule_code, LocalCodeGenerator, model_loading_status
-        if not gemini_available:
-            LocalCodeGenerator.preload_model()
-        local_model_available = True
-    except:
-        local_model_available = False
-        
-# Combined flag to indicate if any model is available
-any_model_available = gemini_available or local_model_available
+
+# Use gemini_available as the only model availability flag
+any_model_available = gemini_available
 
 # Add a button to reset loading messages
 if st.sidebar.button("Reset Loading Messages", help="Click to clear and reset the model loading messages"):
     st.session_state.show_model_messages = False
-    st.rerun()
+    st.experimental_rerun()
 
 # GitHub badge will be added at the top of the sidebar
 
@@ -576,7 +566,7 @@ def generate_rule_code(natural_language_rule):
     """
     Generates Python code for a cellular automaton rule based on a natural language description.
     
-    Uses Google Gemini API as the primary model with local Transformers model as fallback.
+    Uses Google Gemini API to translate the natural language description into executable Python code.
     
     Args:
         natural_language_rule: A string describing the desired cellular automaton rule
@@ -584,7 +574,6 @@ def generate_rule_code(natural_language_rule):
     Returns:
         A string containing Python code implementing the rule, or None if generation failed
     """
-    # Try Gemini first if available
     if gemini_available:
         try:
             gemini_code = generate_rule_code_with_gemini(natural_language_rule)
@@ -592,33 +581,13 @@ def generate_rule_code(natural_language_rule):
                 logger.info("Successfully generated code with Gemini")
                 return gemini_code
             else:
-                logger.warning("Gemini code generation failed, falling back to local model")
-                # Set fallback flag in session state if it exists
-                if hasattr(st, 'session_state') and 'fallback_triggered' in st.session_state:
-                    st.session_state.fallback_triggered = True
+                logger.warning("Gemini code generation failed")
         except Exception as e:
             logger.error(f"Error with Gemini code generation: {str(e)}")
-            logger.info("Falling back to local model")
-            # Set fallback flag in session state if it exists
-            if hasattr(st, 'session_state') and 'fallback_triggered' in st.session_state:
-                st.session_state.fallback_triggered = True
     
-    # Fall back to local model if Gemini failed or is not available
-    if local_model_available:
-        try:
-            # Create an instance of the code generator
-            generator = LocalCodeGenerator()
-            
-            # Generate the code
-            generated_code = generator.generate_code(natural_language_rule)
-            
-            return generated_code
-        except Exception as e:
-            logger.error(f"Error generating code with local model: {str(e)}")
-    
-    # If we get here, both models failed or are not available
+    # If we get here, Gemini failed or is not available
     st.error("⚠️ Unable to generate code from description.")
-    st.info("Please try again with a different description or select one of the built-in rule sets.")
+    st.info("Please check your Gemini API configuration or try again with a different description.")
     return None
 
 def _generate_fallback_code(description):
@@ -797,88 +766,60 @@ for x in range(grid.shape[0]):
     st.markdown("#### Step 2: Generate code from description")
     col1, col2 = st.columns([1, 2])
     
-    # Check model loading status
-    is_model_loading = False
-    if local_model_available and 'model_loading_status' in globals():
-        is_model_loading = model_loading_status.get("is_loading", False)
-        is_model_loaded = model_loading_status.get("is_loaded", False)
-    else:
-        is_model_loaded = local_model_available
-    
     with col1:
         # Generate button with conditional display based on model availability
         generate_button = st.button(
             "🧠 Generate Code", 
-            disabled=not local_model_available or is_model_loading,
-            help="Model is loading, please wait..." if is_model_loading else
-                 "Requires local AI model to be installed" if not local_model_available else 
+            disabled=not gemini_available,
+            help="Google Gemini API not configured" if not gemini_available else 
                  "Click to generate code from your description"
         )
     
     with col2:
-        if is_model_loading:
-            progress = model_loading_status.get("progress", 0)
-            st.warning(f"🔄 AI model is loading ({progress}%)... Please wait.")
-            st.progress(progress / 100.0)
-            if progress < 50:
-                st.info("📚 First-time model loading may take a minute. Future runs will be faster.")
-        elif not local_model_available:
-            st.warning("⚠️ Local AI model not available. Install dependencies: `pip install transformers torch`")
-    
+        if not gemini_available:
+            st.warning("⚠️ Google Gemini API not available. Please check your API key configuration.")
+            st.info("Add GOOGLE_GEMINI_API_KEY to .streamlit/secrets.toml or as an environment variable")
+
+
     # Try to generate code from description if button is clicked and any model is available
     if generate_button and natural_desc.strip():
         if any_model_available:
-            try:
-                # Show which model will be used
-                model_info = ""
-                if gemini_available:
-                    model_info = "Google Gemini API"
-                elif local_model_available:
-                    model_info = "Local Transformers model"
-                    
-                # Store which model was initially attempted
-                initial_model = model_info
-                
-                with st.spinner(f"🔄 Generating rule code using {model_info}... This may take a moment."):
-                    # Create a placeholder to show fallback message if needed
-                    fallback_message = st.empty()
-                    
-                    # Store the current session state value to detect if we fell back
-                    if 'fallback_triggered' not in st.session_state:
-                        st.session_state.fallback_triggered = False
-                    
-                    # Generate code
-                    generated_code = generate_rule_code(natural_desc)
-                    
-                    # Check if we fell back from Gemini to local model
-                    if gemini_available and st.session_state.fallback_triggered:
-                        fallback_message.warning("⚠️ Gemini API failed, fell back to local model")
-                    
-                    # Reset fallback flag for next run
-                    st.session_state.fallback_triggered = False
-                    
-                    if generated_code is not None:
-                        # Show success message with model info
-                        model_used = "Google Gemini" if (gemini_available and not st.session_state.fallback_triggered) else "Local Transformers"
-                        st.success(f"✅ Rule generated by {model_used} and applied automatically!")
+            current_time = time.time()
+            last_call_time = st.session_state.get('last_gemini_call_time', 0)
+
+            if current_time - last_call_time < RATE_LIMIT_SECONDS:
+                remaining_time = RATE_LIMIT_SECONDS - (current_time - last_call_time)
+                st.warning(f"⏳ Please wait {remaining_time:.1f} seconds before trying again.")
+            else:
+                try:
+                    # Using Gemini API for code generation
+                    with st.spinner("🔄 Generating rule code using Google Gemini API... This may take a moment."):
+                        # Generate code
+                        generated_code = generate_rule_code(natural_desc)
+                        st.session_state['last_gemini_call_time'] = time.time() # Update timestamp
                         
-                        # Show the generated code in a collapsible section
-                        with st.expander("View generated code", expanded=False):
-                            st.code(generated_code, language='python')
-                            st.caption("This code has already been applied to the rule editor below.")
-                        
-                        # Apply the generated code to the rule editor
-                        app.set_custom_code(generated_code)
-                    else:
-                        st.warning("⚠️ Could not generate code. Try a more specific description or edit the code manually.")
-            except Exception as e:
-                st.error(f"❌ Error generating code: {str(e)}")
-                st.info("You can still create a rule by editing the code manually below.")
+                        if generated_code is not None:
+                            # Show success message
+                            st.success(f"✅ Rule generated by Google Gemini and applied automatically!")
+                            
+                            # Show the generated code in a collapsible section
+                            with st.expander("View generated code", expanded=False):
+                                st.code(generated_code, language='python')
+                                st.caption("This code has already been applied to the rule editor below.")
+                            
+                            # Apply the generated code to the rule editor
+                            app.set_custom_code(generated_code)
+                            
+                        else:
+                            st.error("⚠️ Could not generate code. Try a more specific description or edit the code manually.")
+
+                except Exception as e:
+                    st.error(f"❌ Error generating code: {str(e)}")
+                    st.info("You can still create a rule by editing the code manually below.")
         else:
-            st.error("❌ No AI models are available.")
-            st.info("To enable rule generation, install the required dependencies or configure the Google Gemini API key.")
-            st.info("For local model: `pip install transformers torch`")
-            st.info("For Gemini: Add GOOGLE_GEMINI_API_KEY to .streamlit/secrets.toml")
+            st.error("❌ Google Gemini API is not available.")
+            st.info("To enable rule generation, configure the Google Gemini API key.")
+            st.info("Add GOOGLE_GEMINI_API_KEY to .streamlit/secrets.toml or as an environment variable")
     
     # Step 3: Edit code
     st.markdown("#### Step 3: Edit your rule code")
