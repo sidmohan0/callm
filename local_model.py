@@ -17,6 +17,9 @@ class LocalCodeGenerator:
     Uses a small model suitable for code generation tasks.
     """
     
+    # Default model to use for code generation
+    DEFAULT_MODEL = "Salesforce/codegen-350M-mono"
+    
     def __init__(self, model_name="Salesforce/codegen-350M-mono", max_length=1024):
         """
         Initialize the code generator with a specified model.

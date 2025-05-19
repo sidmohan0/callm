@@ -133,8 +133,21 @@ cmap = config.cmap
 # UI COMPONENTS - SIDEBAR CONTROLS                         #
 #############################################################
 
+# Add GitHub badge at the top of the sidebar
+st.sidebar.markdown(
+    "<div style='text-align: center;'>"
+    "<a href='https://github.com/sidmohan0/callm' target='_blank'>"
+    "<img src='https://img.shields.io/badge/GitHub-Repository-181717?logo=github' alt='GitHub Repo'>"
+    "</a>"
+    "</div>", 
+    unsafe_allow_html=True
+)
+st.sidebar.markdown("---")
+
 # Update configuration from UI
 config.update_from_ui()
+
+# GitHub badge moved to the bottom of the sidebar
 
 # For convenience, extract commonly used values to local variables
 grid_size = config.grid_size
@@ -448,33 +461,49 @@ def run_custom_rule(grid, custom_code):
 # LOCAL MODEL INTEGRATION                                   #
 #############################################################
 
-# Import the local model for code generation
-try:
-    from local_model import generate_rule_code
-    local_model_available = True
-    st.sidebar.success("✅ Local AI model loaded successfully for custom rule generation.")
-except ImportError as e:
-    st.sidebar.error(f"⚠️ Error importing local model: {str(e)}")
-    st.sidebar.info("To enable custom rule generation, install the required dependencies with: pip install transformers torch")
-    local_model_available = False
-except Exception as e:
-    st.sidebar.error(f"⚠️ Error setting up local model: {str(e)}")
-    st.sidebar.info("The local model may require additional resources. Try using a smaller model or check the logs for details.")
-    local_model_available = False
+# Initialize session state for message management
+if 'show_model_messages' not in st.session_state:
+    st.session_state.show_model_messages = True
 
-# Import the local model function with a different name to avoid namespace conflicts
-try:
-    from local_model import generate_rule_code as local_generate_rule_code
-    local_model_available = True
-    st.sidebar.success("✅ Local AI model loaded successfully for custom rule generation.")
-except ImportError as e:
-    st.sidebar.error(f"⚠️ Error importing local model: {str(e)}")
-    st.sidebar.info("To enable custom rule generation, install the required dependencies with: pip install transformers torch")
-    local_model_available = False
-except Exception as e:
-    st.sidebar.error(f"⚠️ Error setting up local model: {str(e)}")
-    st.sidebar.info("The local model may require additional resources. Try using a smaller model or check the logs for details.")
-    local_model_available = False
+# Import the local model for code generation
+if st.session_state.show_model_messages:
+    try:
+        from local_model import generate_rule_code, LocalCodeGenerator
+        # Get the model name from the LocalCodeGenerator class
+        model_name = getattr(LocalCodeGenerator, 'DEFAULT_MODEL', "Salesforce/codegen-350M-mono")
+        local_model_available = True
+        # Create a clickable link to the model page but use markdown instead of HTML
+        # First show success message
+        st.sidebar.success(f"✅ Local AI model loaded successfully")
+        # Then show the model name with link using markdown
+        st.sidebar.markdown(f"[{model_name}](https://huggingface.co/{model_name})")
+
+    except ImportError as e:
+        st.sidebar.error(f"⚠️ Error importing local model: {str(e)}")
+        st.sidebar.info("To enable custom rule generation, install the required dependencies with: pip install transformers torch")
+        local_model_available = False
+    except Exception as e:
+        st.sidebar.error(f"⚠️ Error setting up local model: {str(e)}")
+        st.sidebar.info("The local model may require additional resources. Try using a smaller model or check the logs for details.")
+        local_model_available = False
+else:
+    # Still try to import but don't show messages
+    try:
+        from local_model import generate_rule_code
+        local_model_available = True
+    except:
+        local_model_available = False
+
+# Add a button to reset loading messages
+if st.sidebar.button("Reset Loading Messages", help="Click to clear and reset the model loading messages"):
+    st.session_state.show_model_messages = False
+    st.rerun()
+
+# GitHub badge will be added at the top of the sidebar
+
+# Rename the imported function to avoid namespace conflicts
+if 'generate_rule_code' in locals():
+    local_generate_rule_code = generate_rule_code
 
 def generate_rule_code(natural_language_rule):
     """
@@ -591,6 +620,16 @@ app = CellularAutomataApp(config)
 
 # Application title
 st.title("CALLM: AI-Powered Cellular Automata Explorer")
+
+# GitHub badge below the title
+st.markdown(
+    "<div>"
+    "<a href='https://github.com/sidmohan0/callm' target='_blank'>"
+    "<img src='https://img.shields.io/badge/GitHub-Repository-181717?logo=github' alt='GitHub Repo'>"
+    "</a>"
+    "</div>", 
+    unsafe_allow_html=True
+)
 
 # Informative subheading with context
 st.markdown("""
